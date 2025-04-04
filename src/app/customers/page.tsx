@@ -1,20 +1,29 @@
-// src/app/customers/page.tsx
 'use client'
 
-import { useState, useEffect } from 'react'
+import React, { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import {
-  Box, Typography, Paper, Grid, Card, CardContent,
-  TextField, InputAdornment, IconButton, CircularProgress,
-  Table, TableBody, TableCell, TableContainer, TableHead,
-  TableRow, TablePagination, Chip, Tooltip, Button
-} from '@mui/material'
-import {
-  Search as SearchIcon,
-  TrendingUp as TrendingUpIcon,
-  TrendingDown as TrendingDownIcon,
-  VisibilityOutlined as ViewIcon
-} from '@mui/icons-material'
+import Box from '@mui/material/Box'
+import Typography from '@mui/material/Typography'
+import Paper from '@mui/material/Paper'
+import Grid from '@mui/material/Grid'
+import TextField from '@mui/material/TextField'
+import InputAdornment from '@mui/material/InputAdornment'
+import IconButton from '@mui/material/IconButton'
+import CircularProgress from '@mui/material/CircularProgress'
+import Table from '@mui/material/Table'
+import TableBody from '@mui/material/TableBody'
+import TableCell from '@mui/material/TableCell'
+import TableContainer from '@mui/material/TableContainer'
+import TableHead from '@mui/material/TableHead'
+import TableRow from '@mui/material/TableRow'
+import TablePagination from '@mui/material/TablePagination'
+import Chip from '@mui/material/Chip'
+import Tooltip from '@mui/material/Tooltip'
+import Button from '@mui/material/Button'
+import SearchIcon from '@mui/icons-material/Search'
+import TrendingUpIcon from '@mui/icons-material/TrendingUp'
+import TrendingDownIcon from '@mui/icons-material/TrendingDown'
+import VisibilityOutlinedIcon from '@mui/icons-material/VisibilityOutlined'
 import { createClient } from '@/lib/supabase/client'
 import { format } from 'date-fns'
 import { tr } from 'date-fns/locale'
@@ -279,7 +288,7 @@ export default function CustomersPage() {
                             {customer.sales_change_percentage > 0 ? (
                               <TrendingUpIcon fontSize="small" color="success" sx={{ mr: 0.5 }} />
                             ) : customer.sales_change_percentage < 0 ? (
-                              <TrendingDownIcon fontSize="small" color="error" sx={{ mr: a0.5 }} />
+                              <TrendingDownIcon fontSize="small" color="error" sx={{ mr: 0.5 }} />
                             ) : null}
                             <Typography 
                               color={
@@ -317,7 +326,7 @@ export default function CustomersPage() {
                               size="small"
                               variant="outlined"
                               onClick={() => handleViewCustomer(customer.id)}
-                              startIcon={<ViewIcon />}
+                              startIcon={<VisibilityOutlinedIcon />}
                             >
                               Detay
                             </Button>

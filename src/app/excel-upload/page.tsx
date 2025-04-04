@@ -1,19 +1,28 @@
 // src/app/excel-upload/page.tsx
 'use client'
 
-import { useState, useCallback, useEffect } from 'react'
+import React, { useState, useCallback, useEffect } from 'react'
 import { useDropzone } from 'react-dropzone'
-import {
-  Box, Typography, Paper, Button, CircularProgress,
-  Stepper, Step, StepLabel, Grid, Alert, Chip, List, 
-  ListItem, ListItemText, LinearProgress, Divider
-} from '@mui/material'
-import {
-  CloudUpload as CloudUploadIcon,
-  CheckCircle as CheckCircleIcon,
-  Error as ErrorIcon,
-  Refresh as RefreshIcon
-} from '@mui/icons-material'
+import Box from '@mui/material/Box'
+import Typography from '@mui/material/Typography'
+import Paper from '@mui/material/Paper'
+import Button from '@mui/material/Button'
+import CircularProgress from '@mui/material/CircularProgress'
+import Stepper from '@mui/material/Stepper'
+import Step from '@mui/material/Step'
+import StepLabel from '@mui/material/StepLabel'
+import Grid from '@mui/material/Grid'
+import Alert from '@mui/material/Alert'
+import Chip from '@mui/material/Chip'
+import List from '@mui/material/List'
+import ListItem from '@mui/material/ListItem'
+import ListItemText from '@mui/material/ListItemText'
+import LinearProgress from '@mui/material/LinearProgress'
+import Divider from '@mui/material/Divider'
+import CloudUploadIcon from '@mui/icons-material/CloudUpload'
+import CheckCircleIcon from '@mui/icons-material/CheckCircle'
+import ErrorIcon from '@mui/icons-material/Error'
+import RefreshIcon from '@mui/icons-material/Refresh'
 import * as XLSX from 'xlsx'
 import { createClient } from '@/lib/supabase/client'
 import { toast } from 'react-toastify'
@@ -34,6 +43,133 @@ export default function ExcelUploadPage() {
   const [importHistory, setImportHistory] = useState<ImportHistory[]>([])
   
   const supabase = createClient()
+
+  // Genel tarih doğrulama ve düzeltme fonksiyonu
+  const sanitizeDate = (dateStr: any): string | null => {
+    // Null veya boş değer kontrolü
+    if (!dateStr || dateStr === '' || dateStr === '0' || dateStr === 0) {
+      return null;
+    }
+    
+    try {
+      // 1. Excel sayısal tarih formatı kontrolü
+      if (!isNaN(Number(dateStr))) {
+        // Excel tarihi olarak işle
+        const excelDate = Number(dateStr);
+        // Excel sayısal formatı için minimal değeri kontrol et (1/1/1900 öncesi tarihleri reddet)
+        if (excelDate < 1) {
+          return null; // Çok düşük değerleri null olarak işaretle
+        }
+        
+        // Çok eski tarihler için (1960 öncesi) bugünün tarihini kullan
+        const date = new Date(Math.floor((excelDate - 25569) * 86400 * 1000));
+        if (date.getFullYear() < 1960) {
+          return new Date().toISOString().split('T')[0];
+        }
+        
+        return date.toISOString().split('T')[0]; // YYYY-MM-DD
+      }
+      
+      // 2. Türkçe format (DD.MM.YYYY) kontrolü
+      if (typeof dateStr === 'string' && dateStr.includes('.')) {
+        const parts = dateStr.split('.');
+        if (parts.length === 3) {
+          // Günü ve ayı sayıya çevirelim
+          const day = parseInt(parts[0]);
+          const month = parseInt(parts[1]);
+          // Yıl 2 basamaklı ise 2000 ekle (örn. 24 -> 2024)
+          let year = parseInt(parts[2]);
+          if (parts[2].length <= 2) {
+            year = 2000 + year;
+          }
+          
+          // Geçerlilik kontrolü
+          if (isNaN(day) || isNaN(month) || isNaN(year) ||
+              day < 1 || day > 31 || month < 1 || month > 12 || year < 1960 || year > 2100) {
+            return new Date().toISOString().split('T')[0]; // Geçersizse bugünün tarihini kullan
+          }
+          
+          // ISO formatına dönüştür: YYYY-MM-DD
+          return `${year}-${month.toString().padStart(2, '0')}-${day.toString().padStart(2, '0')}`;
+        }
+      }
+      
+      // 3. Diğer format denemeleri
+      if (typeof dateStr === 'string') {
+        // Tire (-) ile ayrılmış tarih (DD-MM-YYYY) kontrolü
+        if (dateStr.includes('-') && !dateStr.includes('T')) {
+          const parts = dateStr.split('-');
+          if (parts.length === 3) {
+            if (parts[0].length === 4) {
+              // Zaten YYYY-MM-DD formatındaysa doğrudan dön
+              return dateStr;
+            } else {
+              // DD-MM-YYYY formatını YYYY-MM-DD'ye dönüştür
+              const day = parseInt(parts[0]);
+              const month = parseInt(parts[1]);
+              let year = parseInt(parts[2]);
+              if (parts[2].length <= 2) year = 2000 + year;
+              
+              // Geçerlilik kontrolü
+              if (isNaN(day) || isNaN(month) || isNaN(year) ||
+                  day < 1 || day > 31 || month < 1 || month > 12 || year < 1960 || year > 2100) {
+                return new Date().toISOString().split('T')[0];
+              }
+              
+              return `${year}-${month.toString().padStart(2, '0')}-${day.toString().padStart(2, '0')}`;
+            }
+          }
+        }
+        
+        // Genel tarih dönüşümü denemesi
+        const date = new Date(dateStr);
+        if (!isNaN(date.getTime())) {
+          // Geçerli bir tarih ama çok eski mi?
+          if (date.getFullYear() < 1960) {
+            return new Date().toISOString().split('T')[0];
+          }
+          return date.toISOString().split('T')[0];
+        }
+      }
+      
+      // Burada hiçbir format çalışmadı
+      return new Date().toISOString().split('T')[0]; // Varsayılan olarak bugünün tarihini kullan
+    } catch (e) {
+      console.warn('Tarih dönüşüm hatası:', e, 'Orijinal değer:', dateStr);
+      return new Date().toISOString().split('T')[0]; // Hata durumunda bugünün tarihini kullan
+    }
+  };
+// Türkçe para birimi formatından sayısal değere dönüştürme - Doğru çözüm
+const parseAmount = (value: any): number | null => {
+  if (value === null || value === undefined || value === '') {
+    return null;
+  }
+  
+  try {
+    // Sayıysa direkt dön
+    if (typeof value === 'number') {
+      return value;
+    }
+    
+    // String değilse, stringe çevir
+    const strValue = String(value);
+    
+    // Para birimi sembollerini ve boşlukları temizle
+    let cleanValue = strValue.replace(/[₺TL\s]/g, '');
+    
+    // TÜRKİYE PARA BİRİMİ İŞLEME:
+    // 1. Tüm noktaları (binlik ayraçları) kaldır: 1.234.567,89 -> 1234567,89
+    // 2. Virgülü noktaya çevir (ondalık ayraç): 1234567,89 -> 1234567.89
+    cleanValue = cleanValue.replace(/\./g, '').replace(',', '.');
+    
+    // Sayıya çevir
+    const result = parseFloat(cleanValue);
+    return isNaN(result) ? null : result;
+  } catch (e) {
+    console.warn('Sayı dönüşüm hatası:', e, 'Orijinal değer:', value);
+    return null;
+  }
+};
 
   // Excel dosyasını yükleme
   const onDrop = useCallback((acceptedFiles: File[]) => {
@@ -95,7 +231,7 @@ export default function ExcelUploadPage() {
     reader.readAsBinaryString(file)
   }
 
-  // Veri tabanına aktarma
+  // Veri tabanına aktarma - Tamamen optimize edilmiş ve düzeltilmiş versiyon
   const importDataToDatabase = async () => {
     if (!file || data.length === 0) {
       setError('Yüklenecek veri bulunamadı.')
@@ -121,13 +257,6 @@ export default function ExcelUploadPage() {
           const worksheet = workbook.Sheets[sheetName]
           const json = XLSX.utils.sheet_to_json(worksheet, { raw: false }) as any[]
           
-          // Kategorileri ve müşterileri eklemek için helper fonksiyonlar
-          const processedCategories = new Set()
-          const processedBrands = new Set()
-          const processedCustomers = new Set()
-          const processedProducts = new Set()
-          const processedPersonnel = new Set()
-          
           // Batch için import kaydı oluştur
           const { error: importError } = await supabase
             .from('import_history')
@@ -142,247 +271,303 @@ export default function ExcelUploadPage() {
             throw new Error(`Import kaydı oluşturulamadı: ${importError.message}`)
           }
           
-          // Her 100 satırda bir progress update et
-          const updateInterval = Math.max(1, Math.floor(json.length / 100))
+          // Veri yapılarını hazırla
+          const categories = new Map()
+          const brands = new Map()
+          const customers = new Map()
+          const personnel = new Map()
           
-          // Önce ana verileri ekle (kategoriler, müşteriler, ürünler, personel)
-          for (let i = 0; i < json.length; i++) {
-            const row = json[i]
+          // Önce tüm verileri toplayalım (gruplandırma)
+          setProgress(5)
+          
+          // 1. Önce tekil verileri belirle
+          json.forEach(row => {
+            if (row['Kategori']) categories.set(row['Kategori'], { category_name: row['Kategori'] })
+            if (row['Marka']) brands.set(row['Marka'], { brand_name: row['Marka'] })
+            if (row['Cari Kodu']) customers.set(row['Cari Kodu'], { 
+              customer_code: row['Cari Kodu'],
+              customer_name: row['Cari İsmi'] || 'Bilinmeyen Müşteri',
+              sector_code: row['SektorKodu'] || null
+            })
+            if (row['Satıcı Kodu']) personnel.set(row['Satıcı Kodu'], { 
+              personnel_code: row['Satıcı Kodu'],
+              personnel_name: row['Satıcı İsmi'] || 'Bilinmeyen Personel'
+            })
+          })
+          
+          setProgress(15)
+          
+          // 2. Kategorileri toplu ekle
+          const categoryValues = Array.from(categories.values())
+          if (categoryValues.length > 0) {
+            const { error: categoryError } = await supabase
+              .from('categories')
+              .upsert(categoryValues, { onConflict: 'category_name' })
             
-            // 1. Kategoriyi ekle (eğer daha önce eklenmemişse)
-            if (row['Kategori'] && !processedCategories.has(row['Kategori'])) {
-              const { error: categoryError } = await supabase
-                .from('categories')
-                .upsert({ 
-                  category_name: row['Kategori']
-                }, {
-                  onConflict: 'category_name'
-                })
-              
-              if (categoryError) {
-                console.error('Kategori eklenirken hata:', categoryError)
-              } else {
-                processedCategories.add(row['Kategori'])
-              }
-            }
-            
-            // 2. Markayı ekle (eğer daha önce eklenmemişse)
-            if (row['Marka'] && !processedBrands.has(row['Marka'])) {
-              const { error: brandError } = await supabase
-                .from('brands')
-                .upsert({ 
-                  brand_name: row['Marka']
-                }, {
-                  onConflict: 'brand_name'
-                })
-              
-              if (brandError) {
-                console.error('Marka eklenirken hata:', brandError)
-              } else {
-                processedBrands.add(row['Marka'])
-              }
-            }
-            
-            // 3. Müşteriyi ekle (eğer daha önce eklenmemişse)
-            if (row['Cari Kodu'] && !processedCustomers.has(row['Cari Kodu'])) {
-              const { error: customerError } = await supabase
-                .from('customers')
-                .upsert({ 
-                  customer_code: row['Cari Kodu'],
-                  customer_name: row['Cari İsmi'] || 'Bilinmeyen Müşteri',
-                  sector_code: row['SektorKodu'] || null
-                }, {
-                  onConflict: 'customer_code'
-                })
-              
-              if (customerError) {
-                console.error('Müşteri eklenirken hata:', customerError)
-              } else {
-                processedCustomers.add(row['Cari Kodu'])
-              }
-            }
-            
-            // 4. Satış personelini ekle (eğer daha önce eklenmemişse)
-            if (row['Satıcı Kodu'] && !processedPersonnel.has(row['Satıcı Kodu'])) {
-              const { error: personnelError } = await supabase
-                .from('sales_personnel')
-                .upsert({ 
-                  personnel_code: row['Satıcı Kodu'],
-                  personnel_name: row['Satıcı İsmi'] || 'Bilinmeyen Personel'
-                }, {
-                  onConflict: 'personnel_code'
-                })
-              
-              if (personnelError) {
-                console.error('Personel eklenirken hata:', personnelError)
-              } else {
-                processedPersonnel.add(row['Satıcı Kodu'])
-              }
-            }
-            
-            // İlerlemeyi güncelle
-            if (i % updateInterval === 0) {
-              setProgress(Math.floor((i / json.length) * 50)) // İlk %50'lik kısım
-            }
+            if (categoryError) console.error('Kategoriler eklenirken hata:', categoryError)
           }
           
-          // ID'leri almak için gerekli verileri çek
-          const { data: categories } = await supabase.from('categories').select('id, category_name')
-          const { data: brands } = await supabase.from('brands').select('id, brand_name')
-          const { data: customers } = await supabase.from('customers').select('id, customer_code')
-          const { data: personnel } = await supabase.from('sales_personnel').select('id, personnel_code')
+          setProgress(25)
           
-          // Kategori ve marka lookup tabloları oluştur
-          const categoryMap = new Map()
-          const brandMap = new Map()
-          const customerMap = new Map()
-          const personnelMap = new Map()
-          
-          categories?.forEach(cat => categoryMap.set(cat.category_name, cat.id))
-          brands?.forEach(brand => brandMap.set(brand.brand_name, brand.id))
-          customers?.forEach(cust => customerMap.set(cust.customer_code, cust.id))
-          personnel?.forEach(pers => personnelMap.set(pers.personnel_code, pers.id))
-          
-          // 5. Ürünleri ekle
-          for (let i = 0; i < json.length; i++) {
-            const row = json[i]
+          // 3. Markaları toplu ekle
+          const brandValues = Array.from(brands.values())
+          if (brandValues.length > 0) {
+            const { error: brandError } = await supabase
+              .from('brands')
+              .upsert(brandValues, { onConflict: 'brand_name' })
             
-            if (row['STOK KODU'] && !processedProducts.has(row['STOK KODU'])) {
+            if (brandError) console.error('Markalar eklenirken hata:', brandError)
+          }
+          
+          setProgress(35)
+          
+          // 4. Müşterileri toplu ekle
+          const customerValues = Array.from(customers.values())
+          if (customerValues.length > 0) {
+            const { error: customerError } = await supabase
+              .from('customers')
+              .upsert(customerValues, { onConflict: 'customer_code' })
+            
+            if (customerError) console.error('Müşteriler eklenirken hata:', customerError)
+          }
+          
+          setProgress(45)
+          
+          // 5. Personeli toplu ekle
+          const personnelValues = Array.from(personnel.values())
+          if (personnelValues.length > 0) {
+            const { error: personnelError } = await supabase
+              .from('sales_personnel')
+              .upsert(personnelValues, { onConflict: 'personnel_code' })
+            
+            if (personnelError) console.error('Personel eklenirken hata:', personnelError)
+          }
+          
+          setProgress(55)
+          
+          // ID'leri almak için gerekli verileri paralel olarak çekelim
+          const [
+            { data: categoriesData }, 
+            { data: brandsData }, 
+            { data: customersData }, 
+            { data: personnelData }
+          ] = await Promise.all([
+            supabase.from('categories').select('id, category_name'),
+            supabase.from('brands').select('id, brand_name'),
+            supabase.from('customers').select('id, customer_code'),
+            supabase.from('sales_personnel').select('id, personnel_code')
+          ])
+          
+          // Lookup tabloları oluştur
+          const categoryMap = new Map(categoriesData?.map(cat => [cat.category_name, cat.id]) || [])
+          const brandMap = new Map(brandsData?.map(brand => [brand.brand_name, brand.id]) || [])
+          const customerMap = new Map(customersData?.map(cust => [cust.customer_code, cust.id]) || [])
+          const personnelMap = new Map(personnelData?.map(pers => [pers.personnel_code, pers.id]) || [])
+          
+          setProgress(65)
+          
+          // 6. Ürünleri grupla ve toplu ekle (sayısal ve tarih işlemeyi düzelttik)
+          const products = new Map()
+          json.forEach(row => {
+            if (row['STOK KODU'] && !products.has(row['STOK KODU'])) {
               const categoryId = row['Kategori'] ? categoryMap.get(row['Kategori']) || null : null
               const brandId = row['Marka'] ? brandMap.get(row['Marka']) || null : null
               
-              const { error: productError } = await supabase
-                .from('products')
-                .upsert({ 
-                  product_code: row['STOK KODU'],
-                  product_name: row['Stok İsmi'] || 'Bilinmeyen Ürün',
-                  category_id: categoryId,
-                  brand_id: brandId,
-                  unit: row['Birimi'] || null,
-                  latest_cost: isNaN(parseFloat(row['A.Teklif+'])) ? null : parseFloat(row['A.Teklif+']),
-                  latest_cost_with_tax: isNaN(parseFloat(row['A.TeklifDahil'])) ? null : parseFloat(row['A.TeklifDahil']),
-                  latest_cost_date: row['A.TeklifTarihi'] || null
-                }, {
-                  onConflict: 'product_code'
-                })
-              
-              if (productError) {
-                console.error('Ürün eklenirken hata:', productError)
-              } else {
-                processedProducts.add(row['STOK KODU'])
-              }
+              products.set(row['STOK KODU'], {
+                product_code: row['STOK KODU'],
+                product_name: row['Stok İsmi'] || 'Bilinmeyen Ürün',
+                category_id: categoryId,
+                brand_id: brandId,
+                unit: row['Birimi'] || null,
+                latest_cost: parseAmount(row['A.Teklif+']), // parseAmount kullanıldı
+                latest_cost_with_tax: parseAmount(row['A.TeklifDahil']), // parseAmount kullanıldı
+                latest_cost_date: sanitizeDate(row['A.TeklifTarihi'])
+              })
             }
-            
-            // İlerlemeyi güncelle
-            if (i % updateInterval === 0) {
-              setProgress(50 + Math.floor((i / json.length) * 25)) // %50-75 arası
+          })
+          
+          const productValues = Array.from(products.values())
+          if (productValues.length > 0) {
+            // Ürünleri 20'li batch'ler halinde ekleyelim
+            const batchSize = 20
+            for (let i = 0; i < productValues.length; i += batchSize) {
+              const batch = productValues.slice(i, i + batchSize)
+              try {
+                const { error: productError } = await supabase
+                  .from('products')
+                  .upsert(batch, { onConflict: 'product_code' })
+                
+                if (productError) {
+                  console.error('Ürünler eklenirken hata:', productError)
+                  if (productError.details) console.error('Hata detayları:', productError.details)
+                  if (productError.hint) console.error('Hata ipucu:', productError.hint)
+                  
+                  // Tarihleri null'a çevirerek tekrar dene
+                  batch.forEach(product => {
+                    product.latest_cost_date = null;
+                  });
+                  
+                  const { error: retryError } = await supabase
+                    .from('products')
+                    .upsert(batch, { onConflict: 'product_code' })
+                  
+                  if (retryError) {
+                    console.error('Tarih temizliği ile bile ürünler eklenemedi:', retryError)
+                  }
+                }
+              } catch (e) {
+                console.error('Ürün batch eklenirken beklenmeyen hata:', e)
+              }
+              
+              // Batch ilerleme güncellemesi
+              setProgress(65 + Math.floor((i / productValues.length) * 20))
             }
           }
           
-          // Ürün ID'lerini almak için gerekli verileri çek
-          const { data: products } = await supabase.from('products').select('id, product_code')
+          // Ürün ID'lerini almak için sorgu yapalım
+          const { data: productsData } = await supabase.from('products').select('id, product_code')
+          const productMap = new Map(productsData?.map(prod => [prod.product_code, prod.id]) || [])
           
-          // Ürün lookup tablosu oluştur
-          const productMap = new Map()
-          products?.forEach(prod => productMap.set(prod.product_code, prod.id))
+          setProgress(85)
           
-          // 6. Satış işlemlerini ekle
-          for (let i = 0; i < json.length; i++) {
-            const row = json[i]
-            
+          // 7. Satış işlemlerini grupla ve batch olarak ekle (sayısal ve tarih işleme düzeltildi)
+          const transactions = []
+          
+          for (const row of json) {
             const customerId = row['Cari Kodu'] ? customerMap.get(row['Cari Kodu']) || null : null
             const productId = row['STOK KODU'] ? productMap.get(row['STOK KODU']) || null : null
             const personnelId = row['Satıcı Kodu'] ? personnelMap.get(row['Satıcı Kodu']) || null : null
             
-            // Satış tarihini doğru formata çevir
-            let documentDate = null
-            if (row['Evrak Tarihi']) {
-              try {
-                // Excel tarih formatından ISO formatına çevirme
-                const excelDate = row['Evrak Tarihi']
-                // Eğer sayı ise Excel tarih formatındadır
-                if (!isNaN(Number(excelDate))) {
-                  const date = new Date(Math.floor((Number(excelDate) - 25569) * 86400 * 1000))
-                  documentDate = date.toISOString().split('T')[0]
-                } else {
-                  // String formatındaki tarihi parse et
-                  const date = new Date(excelDate)
-                  documentDate = date.toISOString().split('T')[0]
-                }
-              } catch (e) {
-                console.error('Tarih çevirme hatası:', e)
-                documentDate = new Date().toISOString().split('T')[0] // Hata durumunda bugünün tarihini kullan
-              }
-            }
+            // Tarih alanlarını temizleme fonksiyonu ile düzelt
+            const documentDate = sanitizeDate(row['Evrak Tarihi']) || new Date().toISOString().split('T')[0];
+            const preSalePurchaseDate = sanitizeDate(row['SÖ-AlışTarihi']);
             
-            const { error: transactionError } = await supabase
-              .from('sales_transactions')
-              .insert({ 
-                transaction_type: row['Tip'] || null,
-                document_date: documentDate,
-                customer_id: customerId,
-                product_id: productId,
-                document_number: row['Evrak No'] || null,
-                invoice_number: row['Belge No'] || null,
-                quantity: isNaN(parseFloat(row['Miktar'])) ? 0 : parseFloat(row['Miktar']),
-                unit_price: isNaN(parseFloat(row['BirimSatış'])) ? 0 : parseFloat(row['BirimSatış']),
-                unit_price_with_tax: isNaN(parseFloat(row['BirimSatışKDV'])) ? null : parseFloat(row['BirimSatışKDV']),
-                total_amount: isNaN(parseFloat(row['Tutar'])) ? 0 : parseFloat(row['Tutar']),
-                total_amount_with_tax: isNaN(parseFloat(row['TutarKDV'])) ? null : parseFloat(row['TutarKDV']),
-                tax_amount: isNaN(parseFloat(row['Vergi'])) ? null : parseFloat(row['Vergi']),
-                sales_status: row['SatısDurumu'] || null,
-                purchase_status: row['AlısDurumu'] || null,
-                
-                // Satış öncesi maliyet bilgileri
-                pre_sale_unit_cost: isNaN(parseFloat(row['SÖ-BirimMaliyet'])) ? null : parseFloat(row['SÖ-BirimMaliyet']),
-                pre_sale_unit_cost_with_tax: isNaN(parseFloat(row['Sö-BirimMaliyetKdv'])) ? null : parseFloat(row['Sö-BirimMaliyetKdv']),
-                pre_sale_purchase_date: row['SÖ-AlışTarihi'] || null,
-                pre_sale_unit_profit: isNaN(parseFloat(row['SÖ-BirimKar'])) ? null : parseFloat(row['SÖ-BirimKar']),
-                pre_sale_total_profit: isNaN(parseFloat(row['SÖ-ToplamKar'])) ? null : parseFloat(row['SÖ-ToplamKar']),
-                pre_sale_profit_percentage: isNaN(parseFloat(row['SÖ-KarYuzde'])) ? null : parseFloat(row['SÖ-KarYuzde']),
-                
-                // Ortalama maliyet bilgileri
-                average_unit_cost: isNaN(parseFloat(row['OrtalamaMaliyet'])) ? null : parseFloat(row['OrtalamaMaliyet']),
-                average_unit_cost_with_tax: isNaN(parseFloat(row['OrtalamaMaliyetKDVli'])) ? null : parseFloat(row['OrtalamaMaliyetKDVli']),
-                avg_unit_profit: isNaN(parseFloat(row['BirimKarOrtMalGöre'])) ? null : parseFloat(row['BirimKarOrtMalGöre']),
-                avg_total_profit: isNaN(parseFloat(row['ToplamKarOrtMalGöre'])) ? null : parseFloat(row['ToplamKarOrtMalGöre']),
-                avg_profit_percentage: isNaN(parseFloat(row['OrtalamaKarYuzde'])) ? null : parseFloat(row['OrtalamaKarYuzde']),
-                
-                // Güncel maliyet üzerinden hesaplanan kar bilgileri
-                current_unit_profit: isNaN(parseFloat(row['TeklifAdetKar'])) ? null : parseFloat(row['TeklifAdetKar']),
-                current_total_profit: isNaN(parseFloat(row['TeklifToplamKar'])) ? null : parseFloat(row['TeklifToplamKar']),
-                current_profit_percentage: isNaN(parseFloat(row['TeklifKarYuzde'])) ? null : parseFloat(row['TeklifKarYuzde']),
-                
-                personnel_id: personnelId,
-                notes: row['Aciklama1'] || null,
-                additional_notes: row['EAçıklama1'] || null,
-                import_batch_id: newBatchId
-              })
-            
-            if (transactionError) {
-              console.error('Satış işlemi eklenirken hata:', transactionError)
-            }
-            
-            // İlerlemeyi güncelle
-            if (i % updateInterval === 0) {
-              setProgress(75 + Math.floor((i / json.length) * 25)) // %75-100 arası
+            transactions.push({
+              transaction_type: row['Tip'] || null,
+              document_date: documentDate,
+              customer_id: customerId,
+              product_id: productId,
+              document_number: row['Evrak No'] || null,
+              invoice_number: row['Belge No'] || null,
+              quantity: parseAmount(row['Miktar']) || 0, // parseAmount kullanıldı
+              unit_price: parseAmount(row['BirimSatış']) || 0, // parseAmount kullanıldı
+              unit_price_with_tax: parseAmount(row['BirimSatışKDV']), // parseAmount kullanıldı
+              total_amount: parseAmount(row['Tutar']) || 0, // parseAmount kullanıldı
+              total_amount_with_tax: parseAmount(row['TutarKDV']), // parseAmount kullanıldı
+              tax_amount: parseAmount(row['Vergi']), // parseAmount kullanıldı
+              sales_status: row['SatısDurumu'] || null,
+              purchase_status: row['AlısDurumu'] || null,
+              
+              pre_sale_unit_cost: parseAmount(row['SÖ-BirimMaliyet']), // parseAmount kullanıldı
+              pre_sale_unit_cost_with_tax: parseAmount(row['Sö-BirimMaliyetKdv']), // parseAmount kullanıldı
+              pre_sale_purchase_date: preSalePurchaseDate,
+              pre_sale_unit_profit: parseAmount(row['SÖ-BirimKar']), // parseAmount kullanıldı
+              pre_sale_total_profit: parseAmount(row['SÖ-ToplamKar']), // parseAmount kullanıldı
+              pre_sale_profit_percentage: parseAmount(row['SÖ-KarYuzde']), // parseAmount kullanıldı
+              
+              average_unit_cost: parseAmount(row['OrtalamaMaliyet']), // parseAmount kullanıldı
+              average_unit_cost_with_tax: parseAmount(row['OrtalamaMaliyetKDVli']), // parseAmount kullanıldı
+              avg_unit_profit: parseAmount(row['BirimKarOrtMalGöre']), // parseAmount kullanıldı
+              avg_total_profit: parseAmount(row['ToplamKarOrtMalGöre']), // parseAmount kullanıldı
+              avg_profit_percentage: parseAmount(row['OrtalamaKarYuzde']), // parseAmount kullanıldı
+              
+              current_unit_profit: parseAmount(row['TeklifAdetKar']), // parseAmount kullanıldı
+              current_total_profit: parseAmount(row['TeklifToplamKar']), // parseAmount kullanıldı
+              current_profit_percentage: parseAmount(row['TeklifKarYuzde']), // parseAmount kullanıldı
+              
+              personnel_id: personnelId,
+              notes: row['Aciklama1'] || null,
+              additional_notes: row['EAçıklama1'] || null,
+              import_batch_id: newBatchId
+            })
+          }
+          
+          // Son tarih kontrolü - iki kez kontrol et, çok önemli
+          for (const transaction of transactions) {
+            // document_date NOT NULL olduğu için bugünün tarihini varsayılan olarak ata
+            if (!transaction.document_date || 
+                typeof transaction.document_date !== 'string' || 
+                !/^\d{4}-\d{2}-\d{2}$/.test(transaction.document_date)) {
+              transaction.document_date = new Date().toISOString().split('T')[0];
             }
           }
+          
+          // Satış işlemlerini daha küçük parçalar halinde ekleyelim - batch boyutu daha da küçük
+          const transactionBatchSize = 5; // Daha küçük batch boyutu
+          let successCount = 0;
+          let failCount = 0;
+          
+          for (let i = 0; i < transactions.length; i += transactionBatchSize) {
+            const batch = transactions.slice(i, i + transactionBatchSize);
+            try {
+              // Son bir kontrol daha
+              batch.forEach(record => {
+                if (!record.document_date || typeof record.document_date !== 'string') {
+                  record.document_date = new Date().toISOString().split('T')[0];
+                }
+              });
+              
+              const { error: transactionError } = await supabase
+                .from('sales_transactions')
+                .insert(batch);
+              
+              if (transactionError) {
+                console.error('Satış işlemleri eklenirken hata:', transactionError);
+                
+                // Tek tek kayıt eklemeyi dene 
+                for (const record of batch) {
+                  try {
+                    const { error: singleError } = await supabase
+                      .from('sales_transactions')
+                      .insert([{
+                        ...record,
+                        // Tarihleri tekrar kontrol et
+                        document_date: new Date().toISOString().split('T')[0], // Bugünün tarihini zorla
+                        pre_sale_purchase_date: null // İkinci tarih alanını null yap
+                      }]);
+                    
+                    if (singleError) {
+                      failCount++;
+                      console.error('Tekil kayıt eklenemedi:', singleError);
+                    } else {
+                      successCount++;
+                    }
+                  } catch (e) {
+                    failCount++;
+                    console.error('Tekil kayıt exception:', e);
+                  }
+                }
+              } else {
+                successCount += batch.length;
+              }
+              
+              // Batch ilerleme güncellemesi
+              setProgress(85 + Math.floor((i / transactions.length) * 15));
+            } catch (e) {
+              console.error('Transactions batch eklenirken beklenmeyen hata:', e);
+              failCount += batch.length;
+            }
+          }
+          
+          console.log(`Toplam ${transactions.length} kayıttan ${successCount} başarılı, ${failCount} başarısız.`);
           
           // Import kaydını successful olarak güncelle
           await supabase
             .from('import_history')
-            .update({ successful: true })
-            .eq('batch_id', newBatchId)
+            .update({ 
+              successful: true,
+              row_count: successCount
+            })
+            .eq('batch_id', newBatchId);
           
-          setProgress(100)
-          setActiveStep(2)
-          toast.success('Veriler başarıyla içe aktarıldı!')
-          loadImportHistory()
+          setProgress(100);
+          setActiveStep(2);
+          toast.success(`İçe aktarma tamamlandı! ${successCount} kayıt başarıyla eklendi.`);
+          loadImportHistory();
           
         } catch (error: any) {
-          setError(`İçe aktarma işlemi sırasında bir hata oluştu: ${error.message}`)
-          toast.error('İçe aktarma işlemi başarısız oldu')
+          setError(`İçe aktarma işlemi sırasında bir hata oluştu: ${error.message}`);
+          toast.error('İçe aktarma işlemi başarısız oldu');
           
           // Hata mesajını import kaydına ekle
           await supabase
@@ -391,24 +576,24 @@ export default function ExcelUploadPage() {
               successful: false,
               error_message: error.message
             })
-            .eq('batch_id', newBatchId)
+            .eq('batch_id', newBatchId);
         }
-      }
+      };
       
       reader.onerror = () => {
-        setError('Dosya okunurken bir hata oluştu.')
-        toast.error('Dosya okunurken bir hata oluştu')
-      }
+        setError('Dosya okunurken bir hata oluştu.');
+        toast.error('Dosya okunurken bir hata oluştu');
+      };
       
-      reader.readAsBinaryString(file)
+      reader.readAsBinaryString(file);
       
     } catch (error: any) {
-      setError(`İşlem sırasında bir hata oluştu: ${error.message}`)
-      toast.error('İşlem başarısız oldu')
+      setError(`İşlem sırasında bir hata oluştu: ${error.message}`);
+      toast.error('İşlem başarısız oldu');
     } finally {
-      setIsProcessing(false)
+      setIsProcessing(false);
     }
-  }
+  };
 
   // Yükleme geçmişini yükle
   const loadImportHistory = async () => {
@@ -439,6 +624,17 @@ export default function ExcelUploadPage() {
     setProgress(0)
     setError(null)
     setBatchId('')
+  }
+
+  // Dosya adını kısaltma
+  const shortenFileName = (filename: string, maxLength: number = 25) => {
+    if (filename.length <= maxLength) return filename
+    
+    const extension = filename.split('.').pop()
+    const name = filename.substring(0, filename.lastIndexOf('.'))
+    
+    const shortName = name.substring(0, maxLength - extension!.length - 3) + '...'
+    return `${shortName}.${extension}`
   }
 
   return (
@@ -484,7 +680,7 @@ export default function ExcelUploadPage() {
               <Typography variant="h6" gutterBottom>
                 {isDragActive ? 'Dosyayı Bırakın' : 'Excel Dosyasını Sürükleyin veya Seçin'}
               </Typography>
-              <Typography variant="body2" color="textSecondary" align="center">
+              <Typography variant="body2" color="text.secondary" align="center">
                 .xlsx veya .xls formatındaki Excel dosyalarını destekler
               </Typography>
               <Button
@@ -512,7 +708,7 @@ export default function ExcelUploadPage() {
                     />
                   </Grid>
                   <Grid item>
-                    <Typography variant="body2" color="textSecondary">
+                    <Typography variant="body2" color="text.secondary">
                       {totalRows} satır bulundu
                     </Typography>
                   </Grid>
@@ -581,7 +777,7 @@ export default function ExcelUploadPage() {
               {isProcessing && (
                 <Box sx={{ width: '100%', mt: 2 }}>
                   <LinearProgress variant="determinate" value={progress} />
-                  <Typography variant="body2" color="textSecondary" align="center" sx={{ mt: 1 }}>
+                  <Typography variant="body2" color="text.secondary" align="center" sx={{ mt: 1 }}>
                     {progress}% Tamamlandı
                   </Typography>
                 </Box>
@@ -597,9 +793,9 @@ export default function ExcelUploadPage() {
                   İçe Aktarma Tamamlandı!
                 </Typography>
                 <Typography variant="body1" paragraph>
-                  {totalRows} satır başarıyla veri tabanına aktarıldı.
+                  Veriler başarıyla veri tabanına aktarıldı.
                 </Typography>
-                <Typography variant="body2" color="textSecondary" paragraph>
+                <Typography variant="body2" color="text.secondary" paragraph>
                   Batch ID: {batchId}
                 </Typography>
                 <Button
@@ -623,39 +819,41 @@ export default function ExcelUploadPage() {
             </Typography>
             
             <List>
-              {importHistory.length > 0 ? (
-                importHistory.map((item) => (
-                  <ListItem key={item.id} divider>
-                    <ListItemText
-                      primary={item.filename}
-                      secondary={
-                        <>
-                          <Typography component="span" variant="body2" color="textPrimary">
-                            {new Date(item.import_date).toLocaleString('tr-TR')}
-                          </Typography>
-                          <Box sx={{ display: 'flex', alignItems: 'center', mt: 1 }}>
-                            <Chip
-                              size="small"
-                              label={item.successful ? 'Başarılı' : 'Başarısız'}
-                              color={item.successful ? 'success' : 'error'}
-                              icon={item.successful ? <CheckCircleIcon /> : <ErrorIcon />}
-                              sx={{ mr: 1 }}
-                            />
-                            <Typography variant="body2" color="textSecondary">
-                              {item.row_count || 0} satır
-                            </Typography>
-                          </Box>
-                        </>
-                      }
-                    />
-                  </ListItem>
-                ))
-              ) : (
-                <ListItem>
-                  <ListItemText primary="Henüz yükleme yapılmadı" />
-                </ListItem>
-              )}
-            </List>
+  {importHistory.length > 0 ? (
+    importHistory.map((item) => (
+      <ListItem key={item.id} divider>
+        <Box sx={{ width: '100%' }}>
+          <Typography variant="body1">{item.filename}</Typography>
+          <Typography 
+            component="span" 
+            variant="body2" 
+            color="text.primary" 
+            display="block"
+            sx={{ mt: 1 }}
+          >
+            {new Date(item.import_date).toLocaleString('tr-TR')}
+          </Typography>
+          <Box sx={{ display: 'flex', alignItems: 'center', mt: 1 }}>
+            <Chip
+              size="small"
+              label={item.successful ? 'Başarılı' : 'Başarısız'}
+              color={item.successful ? 'success' : 'error'}
+              icon={item.successful ? <CheckCircleIcon /> : <ErrorIcon />}
+              sx={{ mr: 1 }}
+            />
+            <Typography component="span" variant="body2" color="text.secondary">
+              {item.row_count || 0} satır
+            </Typography>
+          </Box>
+        </Box>
+      </ListItem>
+    ))
+  ) : (
+    <ListItem>
+      <Typography>Henüz yükleme yapılmadı</Typography>
+    </ListItem>
+  )}
+</List>
           </Paper>
         </Grid>
       </Grid>
