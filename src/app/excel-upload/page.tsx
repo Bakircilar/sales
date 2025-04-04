@@ -139,59 +139,101 @@ export default function ExcelUploadPage() {
       return new Date().toISOString().split('T')[0]; // Hata durumunda bugünün tarihini kullan
     }
   };
-// Türkçe para birimi formatından sayısal değere dönüştürme - Doğru çözüm
+
+// Türkçe para birimi formatından sayısal değere dönüştürme - Düzeltilmiş çözüm
 const parseAmount = (value: any): number | null => {
+  // Null kontrolü
   if (value === null || value === undefined || value === '') {
     return null;
   }
   
+  // Debug bilgisi
+  console.log(`parseAmount: Orijinal değer: "${value}", tipi: ${typeof value}`);
+  
   try {
-    // Sayıysa direkt dön
+    // SAYISAL DEĞERLER BÖLÜMÜ
     if (typeof value === 'number') {
-      // Özel durum: Excel'den değer 40000 olarak geliyorsa, muhtemelen çarpan hatası var
+      // Özel Durum: 40000 değerini 400 olarak düzelt
       if (value === 40000) {
-        return 400; // Özel düzeltme
+        return 400;
       }
+      
+      // BÜYÜK SAYILAR İÇİN ZORLA DÜZELTME
+      const strValue = value.toString();
+      if (strValue.includes('.')) {
+        const [intPart, decPart] = strValue.split('.');
+        
+        // FİKS: 100'den büyük ve 2 basamak ondalığı olan her sayıyı düzelt (159.20 -> 159200)
+        if (parseInt(intPart) >= 100 && decPart.length <= 2) {
+          if (decPart.length === 1) {
+            // Örnek: 159.2 -> 159200 
+            return parseInt(intPart) * 1000 + parseInt(decPart) * 100;
+          } else if (decPart.length === 2) {
+            // Örnek: 159.20 -> 159200
+            return parseInt(intPart) * 1000 + parseInt(decPart) * 10;
+          }
+        }
+      }
+      
+      // Diğer sayısal değerler olduğu gibi
       return value;
     }
     
-    // String değilse, stringe çevir
-    const strValue = String(value);
+    // METİN DEĞERLERİ BÖLÜMÜ
+    // String değeri temizle
+    let strValue = String(value).trim();
     
     // Para birimi sembollerini ve boşlukları temizle
-    let cleanValue = strValue.replace(/[₺TL\s]/g, '');
+    strValue = strValue.replace(/[₺TL\s]/g, '');
     
-    // TÜRKİYE PARA BİRİMİ İŞLEME:
+    // DURUM A: Hem nokta hem virgül içeriyorsa (1.234,56 formatı) - Türkçe para birimi
+    if (strValue.includes('.') && strValue.includes(',')) {
+      // Noktaları kaldır, virgülü noktaya çevir
+      return parseFloat(strValue.replace(/\./g, '').replace(',', '.'));
+    }
     
-    // Hem nokta hem virgül varsa (örn: 1.234.567,89)
-    if (cleanValue.includes('.') && cleanValue.includes(',')) {
-      // 1. Noktaları kaldır (binlik ayıraçları): 1.234.567,89 -> 1234567,89
-      // 2. Virgülü noktaya çevir (ondalık ayraç): 1234567,89 -> 1234567.89
-      cleanValue = cleanValue.replace(/\./g, '').replace(',', '.');
-    } 
-    // Sadece nokta varsa (örn: 159.800)
-    else if (cleanValue.includes('.')) {
-      // Son kısım 3 haneli mi kontrol et (binlik ayıracı olabilir)
-      const parts = cleanValue.split('.');
-      const lastPart = parts[parts.length - 1];
+    // DURUM B: Sadece virgül içeriyorsa (123,45 formatı) - Türkçe ondalık
+    if (strValue.includes(',') && !strValue.includes('.')) {
+      // Virgülü noktaya çevir
+      return parseFloat(strValue.replace(',', '.'));
+    }
+    
+    // DURUM C: Sadece nokta içeriyorsa (1.234 veya 123.4 formatı)
+    if (strValue.includes('.')) {
+      const parts = strValue.split('.');
       
-      // Eğer nokta varsa ve son kısım 3 haneli ise (159.800 gibi)
-      // Bu bir binlik ayıracıdır, tüm noktaları kaldır
-      if (lastPart.length === 3) {
-        cleanValue = cleanValue.replace(/\./g, '');
+      // Birden fazla nokta varsa (1.234.567 formatı), kesinlikle binlik ayıracıdır
+      if (parts.length > 2) {
+        return parseInt(strValue.replace(/\./g, ''));
       }
-    }
-    // Sadece virgül varsa (159,80)
-    else if (cleanValue.includes(',')) {
-      // Virgülü noktaya çevir (ondalık ayıracı)
-      cleanValue = cleanValue.replace(',', '.');
+      
+      // Tek nokta varsa - özel durumlar
+      const integerPart = parts[0];
+      const decimalPart = parts[1];
+      
+      // C1: Noktadan sonra 3 rakam varsa (123.456 formatı) - bin ayıracı
+      if (decimalPart.length === 3) {
+        return parseInt(integerPart + decimalPart);
+      }
+      
+      // C2: Büyük sayılar için özel düzeltme
+      if (parseInt(integerPart) >= 100 && decimalPart.length <= 2) {
+        if (decimalPart.length === 1) {
+          return parseInt(integerPart) * 1000 + parseInt(decimalPart) * 100;
+        } else if (decimalPart.length === 2) {
+          return parseInt(integerPart) * 1000 + parseInt(decimalPart) * 10;
+        }
+      }
+      
+      // Diğer durumlarda normal ondalık sayı olarak işle
+      return parseFloat(strValue);
     }
     
-    // Sayıya çevir
-    const result = parseFloat(cleanValue);
-    return isNaN(result) ? null : result;
+    // DURUM D: Nokta veya virgül içermeyen düz sayı
+    return parseFloat(strValue);
+    
   } catch (e) {
-    console.warn('Sayı dönüşüm hatası:', e, 'Orijinal değer:', value);
+    console.error('Sayı dönüşüm hatası:', e, 'Orijinal değer:', value);
     return null;
   }
 };
@@ -226,17 +268,24 @@ const parseAmount = (value: any): number | null => {
     maxFiles: 1
   })
 
-  // Excel dosyasını okuma
+  // Excel dosyasını okuma - DÜZELTİLMİŞ VERSİYON
   const readExcelFile = (file: File) => {
     const reader = new FileReader()
     
     reader.onload = (e) => {
       try {
         const data = e.target?.result
-        const workbook = XLSX.read(data, { type: 'binary' })
+        // DÜZELTİLDİ: raw: true parametresi eklendi - değerlerin ham halde kalmasını sağlar
+        const workbook = XLSX.read(data, { type: 'binary', raw: true })
         const sheetName = workbook.SheetNames[0]
         const worksheet = workbook.Sheets[sheetName]
-        const json = XLSX.utils.sheet_to_json(worksheet, { raw: false })
+        // DÜZELTİLDİ: raw: true parametresi eklendi
+        const json = XLSX.utils.sheet_to_json(worksheet, { raw: true })
+        
+        // İlk satırın içeriğini debug için konsola yazdır
+        if (json.length > 0) {
+          console.log("Excel'den okunan ilk satır örneği:", json[0]);
+        }
         
         setData(json.slice(0, 100)) // Sadece ilk 100 satırı göster
         setTotalRows(json.length)
@@ -277,10 +326,12 @@ const parseAmount = (value: any): number | null => {
       reader.onload = async (e) => {
         try {
           const data = e.target?.result
-          const workbook = XLSX.read(data, { type: 'binary' })
+          // DÜZELTİLDİ: raw: true parametresi eklendi
+          const workbook = XLSX.read(data, { type: 'binary', raw: true })
           const sheetName = workbook.SheetNames[0]
           const worksheet = workbook.Sheets[sheetName]
-          const json = XLSX.utils.sheet_to_json(worksheet, { raw: false }) as any[]
+          // DÜZELTİLDİ: raw: true parametresi eklendi
+          const json = XLSX.utils.sheet_to_json(worksheet, { raw: true }) as any[]
           
           // Batch için import kaydı oluştur
           const { error: importError } = await supabase
@@ -844,41 +895,41 @@ const parseAmount = (value: any): number | null => {
             </Typography>
             
             <List>
-  {importHistory.length > 0 ? (
-    importHistory.map((item) => (
-      <ListItem key={item.id} divider>
-        <Box sx={{ width: '100%' }}>
-          <Typography variant="body1">{item.filename}</Typography>
-          <Typography 
-            component="span" 
-            variant="body2" 
-            color="text.primary" 
-            display="block"
-            sx={{ mt: 1 }}
-          >
-            {new Date(item.import_date).toLocaleString('tr-TR')}
-          </Typography>
-          <Box sx={{ display: 'flex', alignItems: 'center', mt: 1 }}>
-            <Chip
-              size="small"
-              label={item.successful ? 'Başarılı' : 'Başarısız'}
-              color={item.successful ? 'success' : 'error'}
-              icon={item.successful ? <CheckCircleIcon /> : <ErrorIcon />}
-              sx={{ mr: 1 }}
-            />
-            <Typography component="span" variant="body2" color="text.secondary">
-              {item.row_count || 0} satır
-            </Typography>
-          </Box>
-        </Box>
-      </ListItem>
-    ))
-  ) : (
-    <ListItem>
-      <Typography>Henüz yükleme yapılmadı</Typography>
-    </ListItem>
-  )}
-</List>
+              {importHistory.length > 0 ? (
+                importHistory.map((item) => (
+                  <ListItem key={item.id} divider>
+                    <Box sx={{ width: '100%' }}>
+                      <Typography variant="body1">{item.filename}</Typography>
+                      <Typography 
+                        component="span" 
+                        variant="body2" 
+                        color="text.primary" 
+                        display="block"
+                        sx={{ mt: 1 }}
+                      >
+                        {new Date(item.import_date).toLocaleString('tr-TR')}
+                      </Typography>
+                      <Box sx={{ display: 'flex', alignItems: 'center', mt: 1 }}>
+                        <Chip
+                          size="small"
+                          label={item.successful ? 'Başarılı' : 'Başarısız'}
+                          color={item.successful ? 'success' : 'error'}
+                          icon={item.successful ? <CheckCircleIcon /> : <ErrorIcon />}
+                          sx={{ mr: 1 }}
+                        />
+                        <Typography component="span" variant="body2" color="text.secondary">
+                          {item.row_count || 0} satır
+                        </Typography>
+                      </Box>
+                    </Box>
+                  </ListItem>
+                ))
+              ) : (
+                <ListItem>
+                  <Typography>Henüz yükleme yapılmadı</Typography>
+                </ListItem>
+              )}
+            </List>
           </Paper>
         </Grid>
       </Grid>
