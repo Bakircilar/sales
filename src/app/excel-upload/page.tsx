@@ -618,7 +618,7 @@ const parseAmount = (value: any): number | null => {
               }
               
               // Batch ilerleme güncellemesi
-              setProgress(85 + Math.floor((i / transactions.length) * 15));
+              setProgress(85 + Math.floor((i / transactions.length) * 10));
             } catch (e) {
               console.error('Transactions batch eklenirken beklenmeyen hata:', e);
               failCount += batch.length;
@@ -626,6 +626,23 @@ const parseAmount = (value: any): number | null => {
           }
           
           console.log(`Toplam ${transactions.length} kayıttan ${successCount} başarılı, ${failCount} başarısız.`);
+          
+          // YENİ: Özet tablolarını güncelle
+          console.log('Özet tablolarını güncelleme işlemi başlıyor...');
+          setProgress(95);
+
+          try {
+            // 1. Müşteri Özet Tablosunu Güncelle
+            await supabase.rpc('update_monthly_customer_summaries');
+            
+            // 2. Kategori Özet Tablosunu Güncelle
+            await supabase.rpc('update_monthly_category_summaries');
+            
+            console.log('Özet tabloları başarıyla güncellendi');
+          } catch (updateError) {
+            console.error('Özet tabloları güncellenirken hata:', updateError);
+            toast.warning('Veriler yüklendi ancak özet tabloları güncellenirken bir sorun oluştu.');
+          }
           
           // Import kaydını successful olarak güncelle
           await supabase
